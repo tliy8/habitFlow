@@ -1,0 +1,74 @@
+// Enhanced Habit Tracker Schema
+// Supports: Goals, Weekly habits, Colors, Reminders, Timezone
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  timezone  String   @default("UTC")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  habits    Habit[]
+  goals     Goal[]
+}
+
+model Habit {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  frequency    String   @default("daily") // daily, weekly
+  weeklyDays   String?  // JSON array: "[0,1,2,3,4,5,6]" for weekly habits
+  color        String   @default("#8b5cf6")
+  icon         String?
+  startDate    DateTime @default(now())
+  reminderTime String?  // "HH:MM" format
+  archived     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  completions  HabitCompletion[]
+  goals        Goal[]
+}
+
+model HabitCompletion {
+  id         String   @id @default(cuid())
+  date       DateTime
+  isBackfill Boolean  @default(false) // True if marked on past date (doesn't affect streak)
+  note       String?  // Optional note for completion
+  createdAt  DateTime @default(now())
+  
+  habitId    String
+  habit      Habit    @relation(fields: [habitId], references: [id], onDelete: Cascade)
+
+  @@unique([habitId, date])
+}
+
+model Goal {
+  id         String    @id @default(cuid())
+  type       String    @default("streak") // streak, consistency
+  targetDays Int       // 7, 30, 90, etc.
+  startDate  DateTime  @default(now())
+  achieved   Boolean   @default(false)
+  achievedAt DateTime?
+  createdAt  DateTime  @default(now())
+  
+  habitId    String
+  habit      Habit     @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
