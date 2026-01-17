@@ -18,7 +18,7 @@ I built a habit tracker with an embedded AI assistant that can:
 
 | Tool | Why I Chose It |
 |------|----------------|
-| **Google Gemini 1.0 Pro** | Free tier API access, good instruction-following for structured JSON output, handles conversational prompts well |
+| **Google Gemini 1.5 Pro** | Stronger reasoning and context handling, best quality response |
 | **Next.js 16** | Full-stack React framework with built-in API routes – no separate backend needed |
 | **Prisma + SQLite** | Type-safe database queries, zero-configuration database for easy setup |
 | **TypeScript** | Catch errors at compile time, better code maintainability |
@@ -191,7 +191,7 @@ Open [http://localhost:3000](http://localhost:3000)
 - **Frontend:** Next.js 16, React 19, TailwindCSS, Framer Motion
 - **Backend:** Next.js API Routes, Prisma ORM
 - **Database:** SQLite
-- **AI:** Google Gemini 1.0 Pro
+- **AI:** Google Gemini 1.5 Pro
 - **Auth:** NextAuth.js
 
 ---
