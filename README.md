@@ -142,7 +142,7 @@ RULES:
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/habit-tracker.git
+git clone https://github.com/tliy8/habit-tracker.git
 cd habit-tracker
 
 # Install dependencies
@@ -196,6 +196,3 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ---
 
-## License
-
-MIT
