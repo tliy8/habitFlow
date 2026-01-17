@@ -3,7 +3,7 @@ import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
 // Initialize Gemini client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-// Get model instance - use gemini-1.5-pro (most powerful available)
+// Get model instance - use gemini-1.5-flash (fast & cost-effective)
 export function getModel(): GenerativeModel {
     return genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 }

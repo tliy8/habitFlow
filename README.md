@@ -130,9 +130,55 @@ RULES:
 4. Maximum 3 sentences
 ```
 
+### Meta-Prompt (Used to Build This App)
+*This is the prompt I used to guide the AI Agent to build this application:*
+
+```
+Build a modern habit tracking application with an embedded AI "Habit Professional".
+Tech Stack: Next.js 16, Prisma (SQLite), NextAuth, and Google Gemini API.
+
+Core AI Features:
+1. Intent Routing: Classify user input (Log Habit, Coach, Insight, Reflection).
+2. Psychology-Based Coaching: When users miss habits, provide support without shame. Reframe failure as data.
+3. Natural Language Logging: "I ran 5k" -> Logs "Morning Run" habit.
+
+Architecture:
+- Use a router pattern for the AI (Intent Classifier -> Mode Handler).
+- AI should NEVER write to DB directly; return structured JSON for the frontend to handle.
+- Focus on a premium, clean UI ("Apple-like" aesthetics).
+```
+
 ---
 
-## 5. Instructions
+## 5. Deployment on Vercel
+
+> [!WARNING]
+> **Important Note on Database:** This project uses **SQLite**, which is a file-based database. On Vercel (serverless environment), the filesystem is ephemeral. This means **your data will reset every time you redeploy**. For a persistent database in production, recommended to switch to Vercel Postgres or PlanetScale.
+
+### Prerequisites
+1. [Vercel Account](https://vercel.com)
+2. GitHub Repository with this code pushed
+
+### Steps
+1. Go to your Vercel Dashboard and click **"Add New..."** -> **"Project"**
+2. Import your GitHub repository
+3. In the "Configure Project" screen, expand **"Environment Variables"**
+4. Add the following variables:
+
+| Name | Value |
+|------|-------|
+| `GEMINI_API_KEY` | Your Google AI Studio API Key |
+| `NEXTAUTH_SECRET` | A random string (generate with `openssl rand -base64 32`) |
+| `NEXTAUTH_URL` | Your deployment URL (e.g., `https://your-project.vercel.app`) - *Add this after first deploy* |
+| `DATABASE_URL` | `file:./dev.db` (or your postgres URL if upgraded) |
+
+5. Click **"Deploy"**
+
+Vercel will automatically run `npm install`, generate the Prisma client (via `postinstall`), and build your project.
+
+---
+
+## 6. Instructions to Run Locally
 
 ### Prerequisites
 - Node.js 18+
@@ -163,14 +209,9 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-### Testing the AI
-1. Register an account
-2. Create some habits
-3. Use the AI chat feature to log habits or ask for coaching
-
 ---
 
-## 6. Challenges & Iterations
+## 7. Challenges & Iterations
 
 ### Challenge 1: JSON Parsing
 **Problem:** Gemini sometimes wrapped JSON in markdown code blocks.
