@@ -1,27 +1,27 @@
 import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
 
-// Initialize Gemini client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
-// Get model instance - use gemini-1.5-flash (fast & cost-effective)
 export function getModel(): GenerativeModel {
-    return genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+    return genAI.getGenerativeModel({
+        model: "gemini-1.0-pro"
+    });
 }
 
-// Generate text with Gemini
-export async function generateText(prompt: string, systemPrompt?: string): Promise<string> {
+export async function generateText(
+    prompt: string,
+    systemPrompt?: string
+): Promise<string> {
     const model = getModel();
 
     const fullPrompt = systemPrompt
-        ? `${systemPrompt}\n\nUser: ${prompt}`
+        ? `${systemPrompt}\n\n${prompt}`
         : prompt;
 
     const result = await model.generateContent(fullPrompt);
-    const response = await result.response;
-    return response.text();
+    return result.response.text();
 }
 
-// Generate structured JSON response
 export async function generateJSON<T>(
     prompt: string,
     systemPrompt: string,
@@ -29,23 +29,34 @@ export async function generateJSON<T>(
 ): Promise<T | null> {
     const model = getModel();
 
-    const fullPrompt = `${systemPrompt}
+    const fullPrompt = `
+${systemPrompt}
 
-IMPORTANT: Respond with valid JSON only. No markdown, no explanation.
-Expected schema: ${schema}
+You must respond with ONLY raw JSON.
+No markdown.
+No explanation.
+No extra text.
+If you include anything other than JSON, the response is invalid.
 
-User input: ${prompt}`;
+Expected schema:
+${schema}
+
+User input:
+${prompt}
+`;
 
     try {
         const result = await model.generateContent(fullPrompt);
-        const response = await result.response;
-        const text = response.text().trim();
+        const text = result.response.text().trim();
 
-        // Clean potential markdown wrapping
         const cleaned = text
-            .replace(/^```json\n?/i, "")
-            .replace(/\n?```$/i, "")
+            .replace(/^```json\s*/i, "")
+            .replace(/```$/i, "")
             .trim();
+
+        if (!cleaned || cleaned.length < 2) {
+            throw new Error("Empty AI response");
+        }
 
         return JSON.parse(cleaned) as T;
     } catch (error) {
