@@ -3,8 +3,6 @@
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Hardcode the API key for testing (from .env)
-const API_KEY = "AIzaSyA4ctSayAK7215swDsQqUBoimjr0f70M1M";
 
 async function testConnection() {
     console.log("Testing Gemini API connection...");
