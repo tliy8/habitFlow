@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { format } from "date-fns";
+import { format, subDays, parseISO } from "date-fns";
 
 import { routeIntent } from "@/lib/ai/router";
 import { AIResponse } from "@/lib/ai/validator";
@@ -10,6 +10,38 @@ import { handleLogHabit } from "@/lib/ai/modes/log-habit";
 import { handleCoach } from "@/lib/ai/modes/coach";
 import { handleInsight } from "@/lib/ai/modes/insight";
 import { handleReflection } from "@/lib/ai/modes/reflection";
+
+// Calculate current streak for a habit
+function calculateStreak(habitId: string, completions: Array<{ habitId: string; date: Date }>): number {
+    const habitCompletions = completions
+        .filter(c => c.habitId === habitId)
+        .map(c => format(c.date, "yyyy-MM-dd"))
+        .sort()
+        .reverse();
+
+    if (habitCompletions.length === 0) return 0;
+
+    let streak = 0;
+    let checkDate = new Date();
+
+    // Check if today is completed, if not start from yesterday
+    const todayKey = format(checkDate, "yyyy-MM-dd");
+    if (!habitCompletions.includes(todayKey)) {
+        checkDate = subDays(checkDate, 1);
+    }
+
+    // Count consecutive days
+    for (let i = 0; i < 365; i++) {
+        const dateKey = format(subDays(checkDate, i), "yyyy-MM-dd");
+        if (habitCompletions.includes(dateKey)) {
+            streak++;
+        } else {
+            break;
+        }
+    }
+
+    return streak;
+}
 
 export async function POST(req: NextRequest) {
     try {
@@ -57,6 +89,7 @@ export async function POST(req: NextRequest) {
         const todayCompletions = completions.filter(
             (c) => format(c.date, "yyyy-MM-dd") === todayKey
         );
+        const todayCompletedIds = new Set(todayCompletions.map(c => c.habitId));
 
         // Step 3: Handle based on intent
         let response: AIResponse;
@@ -67,7 +100,20 @@ export async function POST(req: NextRequest) {
                 break;
 
             case "coach":
-                response = await handleCoach(message);
+                // Build rich context for personalized coaching
+                const coachContext = {
+                    habits: habits.map(h => ({
+                        name: h.name,
+                        completedToday: todayCompletedIds.has(h.id),
+                    })),
+                    todayCompletedCount: todayCompletions.length,
+                    totalHabits: habits.length,
+                    longestStreak: Math.max(
+                        ...habits.map(h => calculateStreak(h.id, completions)),
+                        0
+                    ),
+                };
+                response = await handleCoach(message, coachContext);
                 break;
 
             case "insight":
@@ -80,7 +126,7 @@ export async function POST(req: NextRequest) {
                     return {
                         habitName: h.name,
                         completionRate: (completedDays / totalDays) * 100,
-                        currentStreak: 0, // Simplified
+                        currentStreak: calculateStreak(h.id, completions),
                     };
                 });
 
@@ -94,20 +140,25 @@ export async function POST(req: NextRequest) {
                 break;
 
             case "reflection":
-                const completedHabitIds = new Set(todayCompletions.map((c) => c.habitId));
                 const completedHabits = habits
-                    .filter((h) => completedHabitIds.has(h.id))
+                    .filter((h) => todayCompletedIds.has(h.id))
                     .map((h) => h.name);
                 const missedHabits = habits
-                    .filter((h) => !completedHabitIds.has(h.id))
+                    .filter((h) => !todayCompletedIds.has(h.id))
                     .map((h) => h.name);
+
+                // Find longest current streak
+                const longestStreak = Math.max(
+                    ...habits.map(h => calculateStreak(h.id, completions)),
+                    0
+                );
 
                 response = await handleReflection(message, {
                     completedCount: completedHabits.length,
                     totalHabits: habits.length,
                     completedHabits,
                     missedHabits,
-                    currentStreak: 0, // Simplified
+                    currentStreak: longestStreak,
                 });
                 break;
 
@@ -122,9 +173,23 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ data: response });
     } catch (error) {
         console.error("[AI API] Error:", error);
+
+        // Check if it's a rate limit error
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (errorMessage.includes("429") || errorMessage.includes("quota")) {
+            return NextResponse.json(
+                {
+                    error: "AI is temporarily busy. Please try again in a few seconds.",
+                    retryable: true
+                },
+                { status: 429 }
+            );
+        }
+
         return NextResponse.json(
-            { error: "AI processing failed" },
+            { error: "AI processing failed. Please try again." },
             { status: 500 }
         );
     }
 }
+

@@ -19,7 +19,7 @@ export function errorResponse(error: unknown, status = 500) {
 
     if (error instanceof ZodError) {
         // Flatten Zod errors into a readable string
-        message = error.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join(', ');
+        message = (error as any).errors.map((e: any) => `${e.path.join('.')}: ${e.message}`).join(', ');
         return NextResponse.json({ success: false, error: message }, { status: 400 });
     }
 

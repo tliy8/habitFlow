@@ -14,6 +14,8 @@ export interface LogHabitData {
         habitName: string;
         matched: boolean;
     }>;
+    suggestCreate?: boolean;
+    unmatchedActivities?: string[];
 }
 
 // Data for insight mode

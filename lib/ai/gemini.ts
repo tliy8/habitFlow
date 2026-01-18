@@ -4,7 +4,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export function getModel(): GenerativeModel {
     return genAI.getGenerativeModel({
-        model: "gemini-1.0-pro"
+        model: "gemini-2.5-flash-lite"
     });
 }
 
