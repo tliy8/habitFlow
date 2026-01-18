@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
         }
 
-        const { message } = await req.json();
+        const { message, history } = await req.json();
 
         if (!message || typeof message !== "string" || message.trim().length === 0) {
             return NextResponse.json({ error: "Message is required" }, { status: 400 });
@@ -96,76 +96,81 @@ export async function POST(req: NextRequest) {
 
         switch (intent) {
             case "log_habit":
-                response = await handleLogHabit(message, habits);
+                response = await handleLogHabit(message, habits, history || []);
 
                 // --- ACTIVE AGENT LOGIC ---
-                // 1. Log Matched Habits
-                if (response.data && response.data.completions) {
-                    for (const completion of response.data.completions) {
-                        if (completion.matched && completion.habitId) {
-                            // Check if already logged today to prevent duplicates
-                            if (!todayCompletedIds.has(completion.habitId)) {
-                                await db.habitCompletion.create({
-                                    data: {
-                                        habitId: completion.habitId,
-                                        date: new Date(),
-                                    },
-                                });
-                                todayCompletedIds.add(completion.habitId); // Mark as done in local state
+                // Type guard and cast for LogHabitData
+                if (response.data && "completions" in response.data) {
+                    const logData = response.data as any;
+
+                    // 1. Log Matched Habits
+                    if (logData.completions) {
+                        for (const completion of logData.completions) {
+                            if (completion.matched && completion.habitId) {
+                                // Check if already logged today to prevent duplicates
+                                if (!todayCompletedIds.has(completion.habitId)) {
+                                    await db.habitCompletion.create({
+                                        data: {
+                                            habitId: completion.habitId,
+                                            date: new Date(),
+                                        },
+                                    });
+                                    todayCompletedIds.add(completion.habitId); // Mark as done in local state
+                                }
                             }
                         }
                     }
-                }
 
-                // 2. Auto-Create & Log Unmatched Habits
-                if (response.data && response.data.unmatchedActivities && response.data.unmatchedActivities.length > 0) {
-                    const createdNames: string[] = [];
+                    // 2. Auto-Create & Log Unmatched Habits
+                    if (logData.unmatchedActivities && logData.unmatchedActivities.length > 0) {
+                        const createdNames: string[] = [];
 
-                    for (const activityName of response.data.unmatchedActivities) {
-                        // Create the new habit
-                        const newHabit = await db.habit.create({
-                            data: {
-                                name: activityName,
-                                userId,
-                                color: "blue", // Default color
-                                icon: "activity", // Default icon
-                            },
-                        });
+                        for (const activityName of logData.unmatchedActivities) {
+                            // Create the new habit
+                            const newHabit = await db.habit.create({
+                                data: {
+                                    name: activityName,
+                                    userId,
+                                    color: "blue", // Default color
+                                    icon: "activity", // Default icon
+                                },
+                            });
 
-                        // Log it for today
-                        await db.habitCompletion.create({
-                            data: {
+                            // Log it for today
+                            await db.habitCompletion.create({
+                                data: {
+                                    habitId: newHabit.id,
+                                    date: new Date(),
+                                },
+                            });
+
+                            createdNames.push(activityName);
+
+                            // Update response data to reflect success
+                            logData.completions.push({
                                 habitId: newHabit.id,
-                                date: new Date(),
-                            },
-                        });
+                                habitName: newHabit.name,
+                                matched: true
+                            });
+                        }
 
-                        createdNames.push(activityName);
+                        // Clear unmatched lists since we handled them
+                        logData.unmatchedActivities = [];
+                        logData.suggestCreate = false;
 
-                        // Update response data to reflect success
-                        response.data.completions.push({
-                            habitId: newHabit.id,
-                            habitName: newHabit.name,
-                            matched: true
-                        });
-                    }
+                        // 3. Update Response Message
+                        if (createdNames.length > 0) {
+                            const createdStr = createdNames.join(" and ");
+                            const existingStr = logData.completions
+                                .filter((c: any) => c.matched && !createdNames.includes(c.habitName))
+                                .map((c: any) => c.habitName)
+                                .join(" and ");
 
-                    // Clear unmatched lists since we handled them
-                    response.data.unmatchedActivities = [];
-                    response.data.suggestCreate = false;
-
-                    // 3. Update Response Message
-                    if (createdNames.length > 0) {
-                        const createdStr = createdNames.join(" and ");
-                        const existingStr = response.data.completions
-                            .filter((c: any) => c.matched && !createdNames.includes(c.habitName))
-                            .map((c: any) => c.habitName)
-                            .join(" and ");
-
-                        if (existingStr) {
-                            response.message = `I've created "${createdStr}" as a new habit and logged it for today. Also logged ${existingStr}.`;
-                        } else {
-                            response.message = `I've created "${createdStr}" as a new habit and logged it for today. Great start!`;
+                            if (existingStr) {
+                                response.message = `I've created "${createdStr}" as a new habit and logged it for today. Also logged ${existingStr}.`;
+                            } else {
+                                response.message = `I've created "${createdStr}" as a new habit and logged it for today. Great start!`;
+                            }
                         }
                     }
                 }
@@ -264,4 +269,3 @@ export async function POST(req: NextRequest) {
         );
     }
 }
-

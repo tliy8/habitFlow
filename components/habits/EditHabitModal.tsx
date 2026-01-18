@@ -30,6 +30,7 @@ export default function EditHabitModal({
     const [name, setName] = useState("");
     const [color, setColor] = useState(COLORS[0]);
     const [frequency, setFrequency] = useState("daily");
+    const [isSaving, setIsSaving] = useState(false);
 
     // Populate form when habit changes
     useEffect(() => {
@@ -40,11 +41,20 @@ export default function EditHabitModal({
         }
     }, [habit]);
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!name.trim()) return;
-        onSave({ name: name.trim(), color, frequency });
-        onClose();
+        if (!name.trim() || isSaving) return;
+
+        setIsSaving(true);
+        try {
+            await onSave({ name: name.trim(), color, frequency });
+            onClose(); // Only close on success
+        } catch (error) {
+            console.error("Save failed:", error);
+            // Don't close - let user retry
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     if (!isOpen || !habit) return null;
@@ -103,8 +113,8 @@ export default function EditHabitModal({
                                     type="button"
                                     onClick={() => setFrequency("daily")}
                                     className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${frequency === "daily"
-                                            ? "border-violet-500 bg-violet-50 text-violet-700"
-                                            : "border-gray-200 hover:border-gray-300"
+                                        ? "border-violet-500 bg-violet-50 text-violet-700"
+                                        : "border-gray-200 hover:border-gray-300"
                                         }`}
                                 >
                                     Daily
@@ -113,8 +123,8 @@ export default function EditHabitModal({
                                     type="button"
                                     onClick={() => setFrequency("weekly")}
                                     className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${frequency === "weekly"
-                                            ? "border-violet-500 bg-violet-50 text-violet-700"
-                                            : "border-gray-200 hover:border-gray-300"
+                                        ? "border-violet-500 bg-violet-50 text-violet-700"
+                                        : "border-gray-200 hover:border-gray-300"
                                         }`}
                                 >
                                     Weekly
@@ -149,9 +159,10 @@ export default function EditHabitModal({
                         {/* Submit */}
                         <button
                             type="submit"
-                            className="w-full py-3 bg-violet-600 hover:bg-violet-700 text-white font-medium rounded-xl transition-colors"
+                            disabled={!name.trim() || isSaving}
+                            className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-xl transition-colors"
                         >
-                            Save Changes
+                            {isSaving ? "Saving..." : "Save Changes"}
                         </button>
                     </form>
                 </motion.div>

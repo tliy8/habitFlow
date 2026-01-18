@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -46,14 +46,15 @@ export default function DashboardPage() {
     const { data: session, status } = useSession();
     const router = useRouter();
 
-    // State
+    // State - ALL useState hooks first, unconditionally
     const [currentMonth, setCurrentMonth] = useState(new Date());
     const [selectedDate, setSelectedDate] = useState<Date | null>(null);
     const [isAddOpen, setIsAddOpen] = useState(false);
     const [loadingHabits, setLoadingHabits] = useState<Record<string, boolean>>({});
     const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
+    const [optimisticToggles, setOptimisticToggles] = useState<Record<string, boolean>>({});
 
-    // Data fetching
+    // Data fetching - SWR hooks, always called
     const monthKey = getMonthKey(currentMonth);
     const { data: calendarData, mutate: mutateCalendar } = useSWR<any>(
         `/api/calendar?month=${monthKey}`,
@@ -67,10 +68,148 @@ export default function DashboardPage() {
         { revalidateOnFocus: false }
     );
 
+    // Extract data (safe defaults for when loading)
+    const habits: Habit[] = calendarData?.data?.habits?.filter((h: Habit) => !h.archived) || [];
+    const completions: Completion[] = calendarData?.data?.completions || [];
+    const stats = statsData?.data?.overview;
+
+    // ALL useMemo hooks - called unconditionally
+    const completionMap = useMemo(() => {
+        const map = new Map<string, Set<string>>();
+        completions.forEach((c) => {
+            const dayKey = c.date.split("T")[0];
+            if (!map.has(dayKey)) map.set(dayKey, new Set());
+            map.get(dayKey)!.add(c.habitId);
+        });
+        return map;
+    }, [completions]);
+
+    const todayKey = useMemo(() => format(new Date(), "yyyy-MM-dd"), []);
+
+    const serverTodayCompletedIds = useMemo(() => {
+        return completionMap.get(todayKey) || new Set<string>();
+    }, [completionMap, todayKey]);
+
+    const calendarDays = useMemo(() => {
+        const monthStart = startOfMonth(currentMonth);
+        const monthEnd = endOfMonth(currentMonth);
+        const calendarStart = startOfWeek(monthStart);
+        const calendarEnd = endOfWeek(monthEnd);
+        return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+    }, [currentMonth]);
+
+    // ALL useCallback hooks - called unconditionally
+    const isHabitCompletedToday = useCallback((habitId: string): boolean => {
+        if (habitId in optimisticToggles) {
+            return optimisticToggles[habitId];
+        }
+        return serverTodayCompletedIds.has(habitId);
+    }, [optimisticToggles, serverTodayCompletedIds]);
+
+    const todayCompletedCount = useMemo(() => {
+        let count = 0;
+        habits.forEach(h => {
+            if (isHabitCompletedToday(h.id)) count++;
+        });
+        return count;
+    }, [habits, isHabitCompletedToday]);
+
+    const todayProgress = habits.length > 0 ? Math.round((todayCompletedCount / habits.length) * 100) : 0;
+
+    const handleToggle = useCallback((habitId: string) => {
+        const currentState = isHabitCompletedToday(habitId);
+        const newState = !currentState;
+
+        // 1. INSTANT: Update optimistic state (triggers immediate re-render)
+        setOptimisticToggles(prev => ({ ...prev, [habitId]: newState }));
+
+        // 2. BACKGROUND: Fire API request (no await, no blocking)
+        fetch(`/api/habits/${habitId}/complete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ isBackfill: false }),
+        })
+            .then(res => {
+                if (!res.ok) throw new Error("Failed");
+                // SUCCESS: Keep optimistic state active.
+                // Do NOT clear it here - that causes the revert.
+                // Do NOT call mutateCalendar() immediately - stale data race.
+                // The optimistic state will be naturally replaced when SWR's
+                // background revalidation brings fresh server data.
+            })
+            .catch(() => {
+                // REVERT: Restore previous state on failure only
+                setOptimisticToggles(prev => ({ ...prev, [habitId]: currentState }));
+                console.error("Toggle failed, reverted");
+            });
+    }, [isHabitCompletedToday]);
+
+    const handleCreate = useCallback(async (data: any) => {
+        try {
+            const res = await fetch("/api/habits", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
+
+            if (!res.ok) {
+                const err = await res.text();
+                throw new Error("Failed to create habit: " + err);
+            }
+
+            await Promise.all([mutateCalendar(), mutateStats()]);
+        } catch (error) {
+            console.error(error);
+            alert("Failed to create habit.");
+        }
+    }, [mutateCalendar, mutateStats]);
+
+    const handleEdit = useCallback((habitId: string) => {
+        const habit = habits.find((h) => h.id === habitId);
+        if (habit) setEditingHabit(habit);
+    }, [habits]);
+
+    const handleSaveEdit = useCallback(async (data: { name: string; color: string; frequency: string }) => {
+        if (!editingHabit) return;
+        const res = await fetch(`/api/habits/${editingHabit.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+        });
+        if (!res.ok) {
+            throw new Error("Failed to update habit");
+        }
+        setEditingHabit(null);
+        mutateCalendar();
+        mutateStats();
+    }, [editingHabit, mutateCalendar, mutateStats]);
+
+    const handleDelete = useCallback(async (habitId: string) => {
+        await fetch(`/api/habits/${habitId}`, { method: "DELETE" });
+        mutateCalendar();
+        mutateStats();
+    }, [mutateCalendar, mutateStats]);
+
+    const getCompletionRate = useCallback((dateKey: string) => {
+        const completed = completionMap.get(dateKey)?.size || 0;
+        return habits.length > 0 ? (completed / habits.length) * 100 : 0;
+    }, [completionMap, habits.length]);
+
+    const selectedDateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
+    const selectedCompletedIds = selectedDateKey ? completionMap.get(selectedDateKey) || new Set() : new Set();
+    const selectedIsEmpty = selectedDate && selectedCompletedIds.size === 0;
+
+    const focusToday = useCallback(() => {
+        setSelectedDate(null);
+        document.getElementById("today-panel")?.scrollIntoView({ behavior: "smooth" });
+    }, []);
+
+    // useEffect - called unconditionally
     useEffect(() => {
         if (status === "unauthenticated") router.push("/login");
     }, [status, router]);
 
+    // ===== EARLY RETURNS AFTER ALL HOOKS =====
     if (status === "loading") {
         return (
             <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-50 via-white to-purple-50">
@@ -80,97 +219,6 @@ export default function DashboardPage() {
     }
 
     if (!session) return null;
-
-    // Extract data
-    const habits: Habit[] = calendarData?.data?.habits?.filter((h: Habit) => !h.archived) || [];
-    const completions: Completion[] = calendarData?.data?.completions || [];
-    const stats = statsData?.data?.overview;
-
-    // Build completion map
-    const completionMap = new Map<string, Set<string>>();
-    completions.forEach((c) => {
-        const dayKey = c.date.split("T")[0];
-        if (!completionMap.has(dayKey)) completionMap.set(dayKey, new Set());
-        completionMap.get(dayKey)!.add(c.habitId);
-    });
-
-    // Today's data
-    const todayKey = format(new Date(), "yyyy-MM-dd");
-    const todayCompletedIds = completionMap.get(todayKey) || new Set();
-    const todayProgress = habits.length > 0 ? Math.round((todayCompletedIds.size / habits.length) * 100) : 0;
-
-    // Calendar days
-    const monthStart = startOfMonth(currentMonth);
-    const monthEnd = endOfMonth(currentMonth);
-    const calendarStart = startOfWeek(monthStart);
-    const calendarEnd = endOfWeek(monthEnd);
-    const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
-
-    // Handlers
-    const handleToggle = async (habitId: string) => {
-        setLoadingHabits((prev) => ({ ...prev, [habitId]: true }));
-        try {
-            await fetch(`/api/habits/${habitId}/complete`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ isBackfill: false }),
-            });
-            mutateCalendar();
-            mutateStats();
-        } finally {
-            setLoadingHabits((prev) => ({ ...prev, [habitId]: false }));
-        }
-    };
-
-    const handleCreate = async (data: any) => {
-        await fetch("/api/habits", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-        });
-        mutateCalendar();
-        mutateStats();
-    };
-
-    const handleEdit = (habitId: string) => {
-        const habit = habits.find((h) => h.id === habitId);
-        if (habit) setEditingHabit(habit);
-    };
-
-    const handleSaveEdit = async (data: { name: string; color: string; frequency: string }) => {
-        if (!editingHabit) return;
-        await fetch(`/api/habits/${editingHabit.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(data),
-        });
-        setEditingHabit(null);
-        mutateCalendar();
-        mutateStats();
-    };
-
-    const handleDelete = async (habitId: string) => {
-        await fetch(`/api/habits/${habitId}`, { method: "DELETE" });
-        mutateCalendar();
-        mutateStats();
-    };
-
-    const getCompletionRate = (dateKey: string) => {
-        const completed = completionMap.get(dateKey)?.size || 0;
-        return habits.length > 0 ? (completed / habits.length) * 100 : 0;
-    };
-
-    // Selected date data
-    const selectedDateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
-    const selectedCompletedIds = selectedDateKey ? completionMap.get(selectedDateKey) || new Set() : new Set();
-    const selectedIsEmpty = selectedDate && selectedCompletedIds.size === 0;
-
-    // Focus today handler for empty state
-    const focusToday = () => {
-        setSelectedDate(null);
-        // Scroll to today's habits panel
-        document.getElementById("today-panel")?.scrollIntoView({ behavior: "smooth" });
-    };
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-violet-50/30">
@@ -390,7 +438,7 @@ export default function DashboardPage() {
                                 />
                             </div>
                             <p className="text-sm text-gray-500">
-                                {todayCompletedIds.size}/{habits.length} habits completed
+                                {todayCompletedCount}/{habits.length} habits completed
                             </p>
                         </div>
 
@@ -416,7 +464,7 @@ export default function DashboardPage() {
                                     </div>
                                 ) : (
                                     habits.map((habit) => {
-                                        const isCompleted = todayCompletedIds.has(habit.id);
+                                        const isCompleted = isHabitCompletedToday(habit.id);
                                         const isLoading = loadingHabits[habit.id];
 
                                         return (
@@ -526,6 +574,11 @@ export default function DashboardPage() {
                 onHabitsLogged={(completions) => {
                     // Auto-toggle habits based on AI logging
                     completions.forEach((c) => handleToggle(c.habitId));
+                }}
+                onDataChanged={() => {
+                    // Refresh habits list when AI creates/logs habits
+                    mutateCalendar();
+                    mutateStats();
                 }}
             />
         </div>

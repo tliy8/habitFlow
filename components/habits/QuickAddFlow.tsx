@@ -11,7 +11,7 @@ interface QuickAddFlowProps {
     onCreate: (data: {
         name: string;
         frequency: "daily" | "weekly";
-        weeklyDays?: number[];
+        weeklyDays?: string; // JSON stringified array
         color: string;
     }) => Promise<void>;
 }
@@ -61,7 +61,7 @@ export default function QuickAddFlow({ isOpen, onClose, onCreate }: QuickAddFlow
             await onCreate({
                 name: name.trim(),
                 frequency,
-                weeklyDays: frequency === "weekly" ? weeklyDays : undefined,
+                weeklyDays: frequency === "weekly" ? JSON.stringify(weeklyDays) : undefined,
                 color,
             });
             reset();
@@ -156,8 +156,8 @@ export default function QuickAddFlow({ isOpen, onClose, onCreate }: QuickAddFlow
                                                             key={s}
                                                             onClick={() => setName(s)}
                                                             className={`px-3 py-1.5 text-sm rounded-full transition-colors ${name === s
-                                                                    ? "bg-violet-600 text-white"
-                                                                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                                                ? "bg-violet-600 text-white"
+                                                                : "bg-gray-100 text-gray-700 hover:bg-gray-200"
                                                                 }`}
                                                         >
                                                             {s}
@@ -183,8 +183,8 @@ export default function QuickAddFlow({ isOpen, onClose, onCreate }: QuickAddFlow
                                                 <button
                                                     onClick={() => setFrequency("daily")}
                                                     className={`flex-1 py-4 rounded-xl font-medium transition-all ${frequency === "daily"
-                                                            ? "bg-violet-600 text-white shadow-lg"
-                                                            : "bg-gray-100 text-gray-700"
+                                                        ? "bg-violet-600 text-white shadow-lg"
+                                                        : "bg-gray-100 text-gray-700"
                                                         }`}
                                                 >
                                                     Daily
@@ -192,8 +192,8 @@ export default function QuickAddFlow({ isOpen, onClose, onCreate }: QuickAddFlow
                                                 <button
                                                     onClick={() => setFrequency("weekly")}
                                                     className={`flex-1 py-4 rounded-xl font-medium transition-all ${frequency === "weekly"
-                                                            ? "bg-violet-600 text-white shadow-lg"
-                                                            : "bg-gray-100 text-gray-700"
+                                                        ? "bg-violet-600 text-white shadow-lg"
+                                                        : "bg-gray-100 text-gray-700"
                                                         }`}
                                                 >
                                                     Weekly
@@ -213,8 +213,8 @@ export default function QuickAddFlow({ isOpen, onClose, onCreate }: QuickAddFlow
                                                                 key={i}
                                                                 onClick={() => toggleDay(i)}
                                                                 className={`w-10 h-10 rounded-full font-medium transition-all ${weeklyDays.includes(i)
-                                                                        ? "bg-violet-600 text-white"
-                                                                        : "bg-gray-100 text-gray-500"
+                                                                    ? "bg-violet-600 text-white"
+                                                                    : "bg-gray-100 text-gray-500"
                                                                     }`}
                                                             >
                                                                 {day}

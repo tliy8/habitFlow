@@ -13,6 +13,7 @@ interface AIResponse {
 
 interface AIAssistantProps {
     onHabitsLogged?: (completions: Array<{ habitId: string; habitName: string }>) => void;
+    onDataChanged?: () => void; // Called when AI creates/logs habits - triggers dashboard refresh
 }
 
 const MODE_ICONS = {
@@ -29,13 +30,14 @@ const MODE_COLORS = {
     reflection: "text-amber-600 bg-amber-50",
 };
 
-export default function AIAssistant({ onHabitsLogged }: AIAssistantProps) {
+export default function AIAssistant({ onHabitsLogged, onDataChanged }: AIAssistantProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
-    const [response, setResponse] = useState<AIResponse | null>(null);
+    const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string; data?: any; mode?: string }>>([]);
     const [error, setError] = useState<string | null>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Focus input when opened
     useEffect(() => {
@@ -44,32 +46,64 @@ export default function AIAssistant({ onHabitsLogged }: AIAssistantProps) {
         }
     }, [isOpen]);
 
+    // Auto-scroll to bottom
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, isOpen]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || isLoading) return;
 
+        const userMessage = input.trim();
+        setInput("");
         setIsLoading(true);
         setError(null);
 
+        // Add user message immediately
+        const newMessages = [...messages, { role: "user" as const, content: userMessage }];
+        setMessages(newMessages);
+
         try {
+            // Include recent history (last 6 messages) for context
+            const history = newMessages.slice(-6).map(m => ({
+                role: m.role,
+                content: m.content
+            }));
+
             const res = await fetch("/api/ai", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: input.trim() }),
+                body: JSON.stringify({
+                    message: userMessage,
+                    history: history
+                }),
             });
 
             if (!res.ok) throw new Error("AI request failed");
 
             const { data } = await res.json();
-            setResponse(data);
-            setInput("");
+
+            // Add AI response
+            setMessages(prev => [...prev, {
+                role: "assistant",
+                content: data.message,
+                data: data.data,
+                mode: data.mode
+            }]);
 
             // Handle log_habit with completions
-            if (data.mode === "log_habit" && data.data?.completions && onHabitsLogged) {
-                const matched = data.data.completions.filter((c: any) => c.matched);
-                if (matched.length > 0) {
-                    onHabitsLogged(matched);
+            if (data.mode === "log_habit") {
+                // Check if completions exist in data (using any cast for safety if needed)
+                const completions = (data.data as any)?.completions;
+                if (completions && Array.isArray(completions)) {
+                    const matched = completions.filter((c: any) => c.matched);
+                    if (matched.length > 0) {
+                        if (onHabitsLogged) onHabitsLogged(matched);
+                    }
                 }
+                // Trigger dashboard refresh so new habits appear immediately
+                if (onDataChanged) onDataChanged();
             }
         } catch (err) {
             console.error("[AIAssistant] Error:", err);
@@ -85,8 +119,6 @@ export default function AIAssistant({ onHabitsLogged }: AIAssistantProps) {
             handleSubmit(e);
         }
     };
-
-    const Icon = response ? MODE_ICONS[response.mode] : Bot;
 
     return (
         <>
@@ -113,13 +145,13 @@ export default function AIAssistant({ onHabitsLogged }: AIAssistantProps) {
                         initial={{ opacity: 0, y: 20, scale: 0.95 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
                         exit={{ opacity: 0, y: 20, scale: 0.95 }}
-                        className="fixed bottom-6 right-6 z-50 w-96 bg-white rounded-2xl shadow-2xl border overflow-hidden"
+                        className="fixed bottom-6 right-6 z-50 w-96 bg-white rounded-2xl shadow-2xl border overflow-hidden flex flex-col max-h-[600px]"
                     >
                         {/* Header */}
-                        <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-500 to-purple-600 text-white">
+                        <div className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-violet-500 to-purple-600 text-white shrink-0">
                             <div className="flex items-center gap-2">
                                 <Bot className="h-5 w-5" />
-                                <span className="font-semibold">Habit Coach</span>
+                                <span className="font-semibold">Habit Intelligence</span>
                             </div>
                             <button
                                 onClick={() => setIsOpen(false)}
@@ -129,132 +161,113 @@ export default function AIAssistant({ onHabitsLogged }: AIAssistantProps) {
                             </button>
                         </div>
 
-                        {/* Content */}
-                        <div className="p-4 min-h-[200px] max-h-[400px] overflow-y-auto">
-                            {/* Response */}
-                            {response ? (
-                                <motion.div
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    className="space-y-3"
-                                >
-                                    {/* Mode badge */}
-                                    <div className={cn(
-                                        "inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium",
-                                        MODE_COLORS[response.mode]
-                                    )}>
-                                        <Icon className="h-3 w-3" />
-                                        {response.mode === "log_habit" && "Logging"}
-                                        {response.mode === "coach" && "Coaching"}
-                                        {response.mode === "insight" && "Insight"}
-                                        {response.mode === "reflection" && "Reflection"}
-                                    </div>
-
-                                    {/* Message - preserve line breaks */}
-                                    <p className="text-gray-700 leading-relaxed whitespace-pre-line">{response.message}</p>
-
-                                    {/* Completions data (for log_habit) */}
-                                    {response.mode === "log_habit" && response.data?.completions && (
-                                        <div className="mt-3 space-y-2">
-                                            {/* Matched habits */}
-                                            {response.data.completions.filter((c: any) => c.matched).length > 0 && (
-                                                <div className="p-3 bg-emerald-50 rounded-lg">
-                                                    <p className="text-sm font-medium text-emerald-800 mb-2">✓ Logged today:</p>
-                                                    <ul className="space-y-1">
-                                                        {response.data.completions
-                                                            .filter((c: any) => c.matched)
-                                                            .map((c: any, i: number) => (
-                                                                <li key={i} className="text-sm text-emerald-700 flex items-center gap-2">
-                                                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                                                                    {c.habitName}
-                                                                </li>
-                                                            ))}
-                                                    </ul>
-                                                </div>
-                                            )}
-
-                                            {/* Unmatched activities - suggest creation */}
-                                            {response.data.unmatchedActivities && response.data.unmatchedActivities.length > 0 && (
-                                                <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
-                                                    <p className="text-sm font-medium text-amber-800 mb-2">New activities detected:</p>
-                                                    <ul className="space-y-1 mb-3">
-                                                        {response.data.unmatchedActivities.map((activity: string, i: number) => (
-                                                            <li key={i} className="text-sm text-amber-700 flex items-center gap-2">
-                                                                <span className="w-2 h-2 rounded-full bg-amber-400" />
-                                                                {activity}
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                    <p className="text-xs text-amber-600">
-                                                        Add these as habits from your dashboard to track them.
-                                                    </p>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* Clear button */}
-                                    <button
-                                        onClick={() => setResponse(null)}
-                                        className="text-sm text-violet-600 hover:text-violet-700"
-                                    >
-                                        Ask another question
-                                    </button>
-                                </motion.div>
-                            ) : error ? (
-                                <div className="text-center py-4">
-                                    <div className="w-12 h-12 mx-auto mb-3 rounded-full bg-red-50 flex items-center justify-center">
-                                        <X className="h-6 w-6 text-red-400" />
-                                    </div>
-                                    <p className="text-red-600 font-medium mb-1">{error}</p>
-                                    <p className="text-sm text-gray-500 mb-3">
-                                        {error.includes("busy") ? "The AI is processing too many requests." : "Something went wrong."}
-                                    </p>
-                                    <button
-                                        onClick={() => setError(null)}
-                                        className="text-sm text-violet-600 hover:text-violet-700 underline"
-                                    >
-                                        Try again
-                                    </button>
-                                </div>
-                            ) : (
+                        {/* Chat Content */}
+                        <div className="flex-1 p-4 overflow-y-auto min-h-[300px] max-h-[400px] bg-gray-50/50">
+                            {messages.length === 0 ? (
                                 <div className="text-center text-gray-500 py-8">
                                     <Bot className="h-12 w-12 mx-auto mb-3 text-gray-300" />
                                     <p className="font-medium text-gray-700 mb-1">How can I help?</p>
                                     <p className="text-sm mb-4">
-                                        Log habits, get coaching, or ask for insights.
+                                        I can log habits, create new ones, and track your streaks.
                                     </p>
                                     <div className="text-xs text-gray-400 space-y-1">
-                                        <p>"I did my morning run"</p>
-                                        <p>"I'm struggling with motivation"</p>
-                                        <p>"How am I doing this week?"</p>
+                                        <p>"I ran 5k and read a book"</p>
+                                        <p>"After that I did gym"</p>
                                     </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {messages.map((msg, idx) => (
+                                        <motion.div
+                                            key={idx}
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            className={cn(
+                                                "flex w-full",
+                                                msg.role === "user" ? "justify-end" : "justify-start"
+                                            )}
+                                        >
+                                            <div className={cn(
+                                                "max-w-[85%] rounded-2xl p-3 text-sm",
+                                                msg.role === "user"
+                                                    ? "bg-violet-600 text-white rounded-br-none"
+                                                    : "bg-white border shadow-sm rounded-bl-none"
+                                            )}>
+                                                {/* Mode Badge for Assistant */}
+                                                {msg.role === "assistant" && msg.mode && (
+                                                    <div className={cn(
+                                                        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium mb-2",
+                                                        MODE_COLORS[msg.mode as keyof typeof MODE_COLORS]
+                                                    )}>
+                                                        {msg.mode === "log_habit" && <Calendar className="h-3 w-3" />}
+                                                        {msg.mode === "coach" && <MessageSquare className="h-3 w-3" />}
+                                                        {msg.mode === "insight" && <TrendingUp className="h-3 w-3" />}
+                                                        {msg.mode === "reflection" && <Sparkles className="h-3 w-3" />}
+                                                        <span className="capitalize">{msg.mode.replace("_", " ")}</span>
+                                                    </div>
+                                                )}
+
+                                                <p className="whitespace-pre-line leading-relaxed">{msg.content}</p>
+
+                                                {/* Rich Data Rendering */}
+                                                {msg.role === "assistant" && msg.mode === "log_habit" && (msg.data as any)?.completions && (
+                                                    <div className="mt-3 space-y-2">
+                                                        {(msg.data as any).completions.some((c: any) => c.matched) && (
+                                                            <div className="p-2 bg-emerald-50 rounded-lg">
+                                                                <p className="text-xs font-medium text-emerald-800 mb-1">✓ Logged:</p>
+                                                                <ul className="space-y-1">
+                                                                    {(msg.data as any).completions
+                                                                        .filter((c: any) => c.matched)
+                                                                        .map((c: any, i: number) => (
+                                                                            <li key={i} className="text-xs text-emerald-700 flex items-center gap-1.5">
+                                                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                                                                {c.habitName}
+                                                                            </li>
+                                                                        ))}
+                                                                </ul>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    ))}
+                                    {isLoading && (
+                                        <div className="flex justify-start">
+                                            <div className="bg-white border shadow-sm rounded-2xl rounded-bl-none p-4">
+                                                <Loader2 className="h-5 w-5 animate-spin text-violet-500" />
+                                            </div>
+                                        </div>
+                                    )}
+                                    {error && (
+                                        <div className="text-center p-2">
+                                            <p className="text-xs text-red-500">{error}</p>
+                                        </div>
+                                    )}
+                                    <div ref={messagesEndRef} />
                                 </div>
                             )}
                         </div>
 
-                        {/* Input */}
-                        <form onSubmit={handleSubmit} className="border-t p-3">
+                        {/* Input Area */}
+                        <form onSubmit={handleSubmit} className="border-t p-3 bg-white shrink-0">
                             <div className="flex items-end gap-2">
                                 <textarea
                                     ref={inputRef}
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
                                     onKeyDown={handleKeyDown}
-                                    placeholder="e.g., I did my morning run today"
-                                    rows={2}
-                                    className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                                    placeholder="Type your message..."
+                                    rows={1}
+                                    className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-transparent max-h-32"
+                                    style={{ minHeight: "40px" }}
                                 />
                                 <button
                                     type="submit"
                                     disabled={!input.trim() || isLoading}
-                                    className="p-2 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-300 text-white rounded-lg transition-colors"
+                                    className="p-2 bg-violet-600 hover:bg-violet-700 disabled:bg-gray-300 text-white rounded-lg transition-colors content-center h-[40px] w-[40px] flex items-center justify-center"
                                 >
-                                    {isLoading ? (
-                                        <Loader2 className="h-5 w-5 animate-spin" />
-                                    ) : (
-                                        <Send className="h-5 w-5" />
-                                    )}
+                                    <Send className="h-4 w-4" />
                                 </button>
                             </div>
                         </form>

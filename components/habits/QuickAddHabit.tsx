@@ -14,7 +14,7 @@ interface QuickAddHabitProps {
         name: string;
         frequency: "daily" | "weekly";
         startDate: string;
-        weeklyDays?: number[];
+        weeklyDays?: string; // Corrected type: expect JSON string
         description?: string;
         color?: string;
     }) => Promise<void>;
@@ -49,7 +49,7 @@ export default function QuickAddHabit({
                 name: name.trim(),
                 frequency,
                 startDate,
-                weeklyDays: frequency === "weekly" ? weeklyDays : undefined,
+                weeklyDays: frequency === "weekly" ? JSON.stringify(weeklyDays) : undefined,
                 description: description.trim() || undefined,
                 color,
             });
@@ -117,8 +117,8 @@ export default function QuickAddHabit({
                                     <button
                                         onClick={() => setFrequency("daily")}
                                         className={`flex-1 py-3 px-4 rounded-xl font-medium transition-all ${frequency === "daily"
-                                                ? "bg-violet-100 text-violet-700 border-2 border-violet-500"
-                                                : "bg-gray-100 text-gray-600 border-2 border-transparent"
+                                            ? "bg-violet-100 text-violet-700 border-2 border-violet-500"
+                                            : "bg-gray-100 text-gray-600 border-2 border-transparent"
                                             }`}
                                     >
                                         Daily
@@ -126,8 +126,8 @@ export default function QuickAddHabit({
                                     <button
                                         onClick={() => setFrequency("weekly")}
                                         className={`flex-1 py-3 px-4 rounded-xl font-medium transition-all ${frequency === "weekly"
-                                                ? "bg-violet-100 text-violet-700 border-2 border-violet-500"
-                                                : "bg-gray-100 text-gray-600 border-2 border-transparent"
+                                            ? "bg-violet-100 text-violet-700 border-2 border-violet-500"
+                                            : "bg-gray-100 text-gray-600 border-2 border-transparent"
                                             }`}
                                     >
                                         Weekly
@@ -150,8 +150,8 @@ export default function QuickAddHabit({
                                                         key={index}
                                                         onClick={() => toggleDay(index)}
                                                         className={`w-10 h-10 rounded-full font-medium transition-all ${weeklyDays.includes(index)
-                                                                ? "bg-violet-600 text-white"
-                                                                : "bg-gray-100 text-gray-500"
+                                                            ? "bg-violet-600 text-white"
+                                                            : "bg-gray-100 text-gray-500"
                                                             }`}
                                                     >
                                                         {day}

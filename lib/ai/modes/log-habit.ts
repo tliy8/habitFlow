@@ -7,24 +7,32 @@ interface Habit {
     color?: string;
 }
 
-const LOG_HABIT_SYSTEM_PROMPT = `You are a friendly habit logging assistant for a habit tracking app.
+const LOG_HABIT_SYSTEM_PROMPT = `ROLE: Autonomous Habit Intelligence Engine
+You are a habit-aware action planner. Convert messy human narratives into concrete habit logs.
 
-The user will describe activities they completed. Your job is to:
-1. Extract ALL activities/habits they mentioned
-2. For each activity, try to match it to their known habit list
+CORE OBJECTIVE:
+1. Identify habits from natural language (including compound sentences like "run AND gym")
+2. Match to known habits (fuzzy match)
+3. Create NEW habits if no match exists (use clean, short names e.g. "Gym Workout")
+4. Detect completion status and context
 
-Be GENEROUS in matching:
-- "ran 5km" → "Morning Run" or "Running"
-- "drank water" → "Drink Water" or "Hydration"
-- "60 minute HIIT" → "HIIT Training" or "Workout" or "Exercise"
-- "read for 30 minutes" → "Reading" or "Read"
+CRITICAL - COMPOUND ACTIONS:
+Users often chain actions. "I ran and then did gym" = 2 distinct habits.
+Scan for splitters: "and", "then", "after", "also".
+ALWAYS extract ALL habits found in the text.
+
+HABIT CREATION RULES:
+- If unmatched, create a new habit with a clean Name.
+- "did gym exercise" -> "Gym Workout"
+- "read book" -> "Reading"
 
 User's known habits: {HABITS}
 
-For EACH activity the user mentions, return it in parsedHabits with:
-- habitName: the activity as the user described it
-- matchedTo: the exact name from known habits if matched, or null if no match
-- confidence: how confident you are in the match (0-1)`;
+OUTPUT SCHEMA:
+Return 'parsedHabits' array. For EACH detected activity:
+- habitName: clean, concise name (e.g. "Gym", "Reading")
+- matchedTo: exact name from known habits if matched, or null
+- confidence: 0-1`;
 
 const LOG_HABIT_SCHEMA = `{
   "parsedHabits": [
@@ -38,12 +46,19 @@ const LOG_HABIT_SCHEMA = `{
 
 export async function handleLogHabit(
     userMessage: string,
-    userHabits: Habit[]
+    userHabits: Habit[],
+    conversationHistory: { role: string; content: string }[] = []
 ): Promise<AIResponse> {
     const habitList = userHabits.length > 0
         ? userHabits.map((h) => h.name).join(", ")
         : "No habits created yet";
-    const systemPrompt = LOG_HABIT_SYSTEM_PROMPT.replace("{HABITS}", habitList);
+
+    // Format history for the prompt
+    const historyText = conversationHistory.length > 0
+        ? "RECENT CONVERSATION HISTORY:\n" + conversationHistory.map(m => `${m.role === 'user' ? 'User' : 'AI'}: ${m.content}`).join("\n") + "\n\n"
+        : "";
+
+    const systemPrompt = LOG_HABIT_SYSTEM_PROMPT.replace("{HABITS}", habitList) + "\n\n" + historyText;
 
     const result = await generateJSON<{
         parsedHabits: Array<{
